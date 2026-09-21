@@ -26,19 +26,20 @@ Internet ──▶ ALB (:80) ──▶ Target Group ──▶ ECS Fargate task (
 
 ## One-time setup
 
-You need this done once before the pipeline can run.
+### Terraform state bucket — handled automatically
 
-### 1. Create the Terraform state bucket
+The state bucket does **not** need to be created by hand. The Jenkins pipeline
+has an **"Ensure Terraform state bucket"** stage that creates it (with
+versioning, encryption, and public access blocked) if it doesn't exist. The
+bucket name is derived deterministically from your AWS account ID:
+`test-ecs-website-tfstate-<ACCOUNT_ID>`, and passed to `terraform init` via
+`-backend-config`.
 
-```bash
-cd terraform
-./bootstrap-backend.sh my-unique-tfstate-bucket-name us-east-1
-```
+For **local** runs (no Jenkins), either run `terraform/bootstrap-backend.sh
+<bucket> us-east-1` once, or just create the bucket and pass it at init time —
+see "Deploying manually" below.
 
-Then set the bucket name in `terraform/backend.tf` (the `bucket = ...` line),
-or pass it at init time with `-backend-config="bucket=..."`.
-
-### 2. Jenkins prerequisites
+### Jenkins prerequisites
 
 The Jenkins agent needs:
 
@@ -72,7 +73,10 @@ Because there's no state lock table, concurrent builds are disabled
 ```bash
 # from repo root, with AWS creds + docker available:
 cd terraform
-terraform init
+BUCKET="test-ecs-website-tfstate-$(aws sts get-caller-identity --query Account --output text)"
+# create the state bucket once (skip if it already exists):
+./bootstrap-backend.sh "$BUCKET" us-east-1
+terraform init -backend-config="bucket=$BUCKET"
 terraform apply -target=aws_ecr_repository.main -auto-approve
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
